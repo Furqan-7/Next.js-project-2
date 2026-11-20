@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>JobPilot settings</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body style="width:auto;max-width:28rem;margin:2rem auto">
+    <main>
+      <h1 style="font-size:16px;margin:0">JobPilot extension settings</h1>
+      <label>JobPilot app address <input id="webUrl" placeholder="http://localhost:3000" /></label>
+      <p class="muted">The extension signs in and calls the API through this address (it proxies /backend to the API).</p>
+      <div class="row"><button id="save">Save</button><span id="saved" class="muted"></span></div>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

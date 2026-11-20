@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>JobPilot</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header><span class="logo">J</span><strong>JobPilot</strong><span id="who" class="muted" style="margin-left:auto"></span></header>
+    <main>
+      <section id="login" class="hidden">
+        <p class="muted">Sign in to your JobPilot account. <a href="options.html" target="_blank">Change app address</a></p>
+        <label>Email <input id="email" type="email" /></label>
+        <label>Password <input id="password" type="password" /></label>
+        <button id="signin">Sign in</button>
+        <p id="loginError" class="bad"></p>
+      </section>
+
+      <section id="capture" class="hidden">
+        <p class="muted" id="pageInfo">Reading this page…</p>
+        <div class="row">
+          <button id="go">Find email &amp; draft</button>
+          <button id="logout" class="secondary">Sign out</button>
+        </div>
+        <p id="status" class="muted"></p>
+        <div id="result" class="hidden" style="display:grid;gap:10px">
+          <div class="card" id="companyCard"></div>
+          <div class="card" id="contactCard"></div>
+          <label>Subject <input id="subject" /></label>
+          <label>Email <textarea id="body"></textarea></label>
+          <div class="row">
+            <button id="copy" class="secondary">Copy</button>
+            <a id="open" target="_blank" rel="noreferrer">Open in JobPilot →</a>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

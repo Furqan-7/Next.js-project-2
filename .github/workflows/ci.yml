@@ -1,6 +1,8 @@
 name: CI
+
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
@@ -10,11 +12,17 @@ jobs:
       postgres:
         image: postgres:16
         env:
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: jobpilot_test
-        ports: ["5432:5432"]
+        ports:
+          - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-retries 10
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jobpilot_test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -23,8 +31,23 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm --filter @jobpilot/shared test
-      - run: pnpm --filter @jobpilot/api test
-      - run: pnpm --filter @jobpilot/web build
-      - run: pnpm --filter @jobpilot/api build
+
+      - name: Typecheck (shared, db, backend, frontend)
+        run: pnpm typecheck
+
+      - name: Shared logic tests
+        run: pnpm --filter shared test
+
+      - name: Backend tests (unit + integration against Postgres)
+        run: pnpm --filter backend test
+
+      - name: Frontend lint
+        run: pnpm --filter frontend lint
+
+      - name: Frontend build
+        run: pnpm --filter frontend build
+        env:
+          BACKEND_URL: http://localhost:3001
+
+      - name: Backend build
+        run: pnpm --filter backend build

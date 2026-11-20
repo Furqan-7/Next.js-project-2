@@ -4,15 +4,37 @@ Upload a resume once. JobPilot finds jobs that fit, finds the founder / CTO / hi
 
 **Stack:** Node.js + TypeScript (Express 5, Drizzle ORM, PostgreSQL, BullMQ on Redis) for the API · Next.js 16 + TypeScript + Tailwind CSS 4 for the web app · Claude (Anthropic SDK) for AI · a Manifest V3 Chrome extension.
 
+## Project structure
+
 ```
-apps/
-  api/        Node + TS API, background worker, Postgres schema + migrations
-  web/        Next.js app (App Router), proxies /api/* to the API
-  extension/  Chrome extension (one-click capture + draft)
-packages/
-  shared/     Pure TS logic shared by API and web: scoring, dedupe, scam & spam checks,
-              email patterns, time zones, warm-up, reply classification, analytics insights
+backend/                 Express + TypeScript API and background worker  (port 3001)
+  src/index.ts           starts the API (applies migrations first)
+  src/app.ts             Express app: middleware + routers
+  src/worker.ts          BullMQ worker: sending, discovery, reminders, digests, reports
+  src/routes/            HTTP routes (auth, profile, jobs, companies, outreach, inbox, crm, mailboxes…)
+  src/ingest/            job sources (Greenhouse, Lever, Ashby, Workable, HN, YC, X, RSS…) + discovery
+  src/services/          domain logic: people finder, writer, sequencer, replies, deliverability…
+  src/lib/               auth, llm (Claude), http (SSRF-safe fetch), storage, rate limit, logger…
+  src/config/            environment variables
+  test/                  vitest unit + integration tests (real Postgres)
+  Dockerfile
+frontend/                Next.js App Router + Tailwind  (port 3000)
+  app/                   pages: (app)/dashboard, jobs, outreach, campaigns, inbox, tracker, analytics…
+  app/(app)/AppShell.tsx signed-in layout (sidebar, notifications, pause switch)
+  app/components/        by feature: landing/, auth/, jobs/, outreach/, inbox/, analytics/ + ui.tsx
+  app/hooks/             useApi
+  app/services/api.ts    the only place that calls the API (via the /backend proxy)
+  app/types/             API response types
+  e2e/                   Playwright tests (app + extension)
+  Dockerfile
+db/                      Drizzle schema, migrations and client  (import from "db", "db/schema")
+shared/                  pure TypeScript used by both sides: scoring, dedupe, scam & spam checks,
+                         email patterns, time zones, warm-up, reply classification, insights
+extension/               Chrome extension (popup, options, extractor) → node extension/build.mjs
+docker-compose.yml       Postgres + Redis + API + worker + web
 ```
+
+The browser only talks to the Next.js app. Requests to `/backend/*` are proxied to the Express API (`BACKEND_URL`, default `http://localhost:3001`), so the session cookie stays first-party.
 
 ## Quick start
 
@@ -20,23 +42,26 @@ Requirements: Node 20+, pnpm, PostgreSQL 16, Redis 7 (or `docker compose up -d`)
 
 ```bash
 pnpm install
-cp apps/api/.env.example apps/api/.env     # defaults work for local dev
-docker compose up -d                        # Postgres + Redis (skip if you run them yourself)
+cp backend/.env.example backend/.env       # defaults work for local dev
+docker compose up -d db redis               # Postgres + Redis (skip if you run them yourself)
 pnpm db:migrate
 pnpm db:seed                                # demo account: demo@jobpilot.dev / demo12345
-pnpm dev                                    # API :4000, worker, web :3000
+pnpm dev                                    # frontend :3000, backend :3001, worker
 ```
 
 Open http://localhost:3000. Without any API keys, everything works using rule-based fallbacks, and the **dev mailbox** (Settings → "Add dev mailbox") captures emails instead of sending them, so you can try the full flow safely. Add `ANTHROPIC_API_KEY` to switch every AI feature to Claude.
 
-Without Redis you can still run sending and reminders inside the API: `RUN_SCHEDULER_INLINE=true pnpm --filter @jobpilot/api dev`.
+Without Redis you can still run sending and reminders inside the API: `RUN_SCHEDULER_INLINE=true pnpm --filter backend dev`.
+
+Everything in Docker instead: `docker compose up --build`, then open http://localhost:3000.
 
 ## Tests
 
 ```bash
-pnpm test                                   # shared (27) + API (67) + extension (3)
-pnpm --filter @jobpilot/api test            # needs Postgres; uses database jobpilot_test
-pnpm test:e2e                               # 10 Playwright tests against a running stack (seed first)
+pnpm test                                   # shared (27) + backend (67)
+pnpm --filter backend test                  # needs Postgres; uses database jobpilot_test
+pnpm test:e2e                               # 13 Playwright tests (10 against a running, seeded stack + 3 extension)
+pnpm lint                                   # ESLint (next/core-web-vitals + typescript)
 ```
 
 The API suite runs the real HTTP app against a real Postgres. It covers signup, resume parsing, discovery dedupe, scam filtering, match ranking, contact email guessing, drafting, approval, sending with tracking, opens, free-plan limits, autopilot campaigns, follow-up scheduling, random gaps, daily limits, one-click pause, reply classification, stopping sequences, bounces, suppression, the kanban board, prep packs, analytics, public profiles, extension capture, the college plan, unsubscribe and webhooks. Outbound network calls are switched off in tests (`OFFLINE=true`). Regression tests cover real PDF parsing, SSRF blocking, auth rate limits, one-click unsubscribe, resume attachments and follow-up timing.
@@ -45,24 +70,24 @@ The API suite runs the real HTTP app against a real Postgres. It covers signup, 
 
 | # | Feature | Where |
 |---|---------|-------|
-| 1 | Resume PDF → skills, projects, experience, education (Claude reads the PDF; text parser fallback) | `api/services/resume.ts`, `shared/resumeParser.ts` |
-| 1 | GitHub (repos, languages, topics), portfolio, LinkedIn link | `api/services/enrich.ts` |
-| 1 | Fresher/experienced, years, target roles, work mode, cities, stipend/CTC, company size, industries, employment type | onboarding: `web/app/onboarding`, `api/routes/profile.ts` |
+| 1 | Resume PDF → skills, projects, experience, education (Claude reads the PDF; text parser fallback) | `backend/src/services/resume.ts`, `shared/src/resumeParser.ts` |
+| 1 | GitHub (repos, languages, topics), portfolio, LinkedIn link | `backend/src/services/enrich.ts` |
+| 1 | Fresher/experienced, years, target roles, work mode, cities, stipend/CTC, company size, industries, employment type | onboarding: `frontend/app/onboarding`, `backend/src/routes/profile.ts` |
 | 1 | Writing-style sample → style profile used by the writer | `enrich.ts` (`analyzeWritingStyle`), `writer.ts` |
-| 2 | Greenhouse, Lever, Ashby, Workable, Remotive, RemoteOK, HN "Who's Hiring", YC hiring companies, X hiring posts | `api/services/discovery/sources.ts` |
+| 2 | Greenhouse, Lever, Ashby, Workable, Remotive, RemoteOK, HN "Who's Hiring", YC hiring companies, X hiring posts | `backend/src/ingest/sources.ts` |
 | 2 | Funding news (TechCrunch, Crunchbase News, Inc42 RSS) → "newly funded" flags | `sources.ts` (`parseFundingRss`), dashboard |
-| 2 | Cross-platform dedupe, 0–100 match score with reasons, daily feed, scam detection | `shared/dedupe.ts`, `shared/scoring.ts`, `shared/scam.ts`, `discovery/index.ts` |
-| 3 | People finder: website team pages, GitHub org members, job posts, optional Apollo / Hunter | `api/services/people.ts` |
-| 3 | Email pattern detection (from commit emails / known addresses), candidates, MX + SMTP verification, confidence | `shared/emailPatterns.ts`, `api/services/emailVerify.ts` |
+| 2 | Cross-platform dedupe, 0–100 match score with reasons, daily feed, scam detection | `shared/src/dedupe.ts`, `shared/src/scoring.ts`, `shared/src/scam.ts`, `backend/src/ingest/index.ts` |
+| 3 | People finder: website team pages, GitHub org members, job posts, optional Apollo / Hunter | `backend/src/services/people.ts` |
+| 3 | Email pattern detection (from commit emails / known addresses), candidates, MX + SMTP verification, confidence | `shared/src/emailPatterns.ts`, `backend/src/services/emailVerify.ts` |
 | 3 | Recent posts (GitHub, blog RSS, X), company research card (product, stack, news, size) | `people.ts` (`fetchRecentPosts`), `research.ts` |
-| 4 | Personalised emails, best-project matching, 3 tones, 3–5 subjects, A/B, spam checker, tailored resume link, LinkedIn notes/DMs, cover letters | `api/services/writer.ts`, `shared/templates.ts`, `shared/spam.ts`, `/p/[slug]?for=<job>` |
-| 5 | Gmail / Outlook OAuth sending, recipient-time-zone scheduling, day 3/7/14 follow-ups that stop on reply, daily limits, random gaps, approval vs autopilot, bulk campaigns, one-click pause | `api/services/mail/providers.ts`, `api/services/sequencer.ts`, `shared/timezone.ts`, `shared/sending.ts` |
-| 6 | SPF / DKIM / DMARC checks + setup guides, warm-up ramp, bounce handling + suppression list, inbox placement tests, health score | `api/services/deliverability.ts`, `replies.ts`, `web/app/(app)/deliverability` |
-| 7 | Gmail Pub/Sub and Outlook Graph webhooks, reply classification, suggested replies, Cal.com / Google Calendar links, push + WhatsApp notifications | `api/routes/inbox.ts`, `api/services/replies.ts`, `notify.ts` |
-| 8 | Kanban (Found → Emailed → Replied → Interview → Offer → Rejected), notes, reminders, timeline, manual applications | `api/routes/crm.ts`, `web/app/(app)/tracker` |
-| 9 | Interview prep pack (company brief, likely questions, STAR stories from your projects, questions to ask), stipend/salary negotiation tips | `api/services/prep.ts` |
-| 10 | Open / reply rates per template, subject, role, company size, contact role, tone, step; A/B significance; weekly report; AI suggestions | `api/services/analytics.ts`, `shared/insights.ts`, `web/app/(app)/analytics` |
-| 11 | Chrome extension, alumni referral finder, public profile page, Free / Pro limits, College plan with admin dashboard and invite codes | `apps/extension`, `people.ts` (`referralCandidates`), `/p/[slug]`, `shared/plans.ts`, `api/routes/misc.ts` |
+| 4 | Personalised emails, best-project matching, 3 tones, 3–5 subjects, A/B, spam checker, tailored resume link, LinkedIn notes/DMs, cover letters | `backend/src/services/writer.ts`, `shared/src/templates.ts`, `shared/src/spam.ts`, `/p/[slug]?for=<job>` |
+| 5 | Gmail / Outlook OAuth sending, recipient-time-zone scheduling, day 3/7/14 follow-ups that stop on reply, daily limits, random gaps, approval vs autopilot, bulk campaigns, one-click pause | `backend/src/services/mail/providers.ts`, `backend/src/services/sequencer.ts`, `shared/src/timezone.ts`, `shared/src/sending.ts` |
+| 6 | SPF / DKIM / DMARC checks + setup guides, warm-up ramp, bounce handling + suppression list, inbox placement tests, health score | `backend/src/services/deliverability.ts`, `replies.ts`, `frontend/app/(app)/deliverability` |
+| 7 | Gmail Pub/Sub and Outlook Graph webhooks, reply classification, suggested replies, Cal.com / Google Calendar links, push + WhatsApp notifications | `backend/src/routes/inbox.ts`, `backend/src/services/replies.ts`, `notify.ts` |
+| 8 | Kanban (Found → Emailed → Replied → Interview → Offer → Rejected), notes, reminders, timeline, manual applications | `backend/src/routes/crm.ts`, `frontend/app/(app)/tracker` |
+| 9 | Interview prep pack (company brief, likely questions, STAR stories from your projects, questions to ask), stipend/salary negotiation tips | `backend/src/services/prep.ts` |
+| 10 | Open / reply rates per template, subject, role, company size, contact role, tone, step; A/B significance; weekly report; AI suggestions | `backend/src/services/analytics.ts`, `shared/src/insights.ts`, `frontend/app/(app)/analytics` |
+| 11 | Chrome extension, alumni referral finder, public profile page, Free / Pro limits, College plan with admin dashboard and invite codes | `extension/`, `people.ts` (`referralCandidates`), `/p/[slug]`, `shared/src/plans.ts`, `backend/src/routes/misc.ts` |
 
 ## What needs your own setup (honest limits)
 
@@ -99,10 +124,12 @@ Every email goes from the user's own mailbox, never a shared server. Other defau
 
 | Command | What it does |
 |---|---|
-| `pnpm dev` | API + worker + web with reload |
-| `pnpm build` | Type-check shared, bundle API (`apps/api/dist`), build web, copy extension to `apps/extension/build` |
-| `pnpm db:generate` | Generate a new migration after editing `apps/api/src/db/schema.ts` |
+| `pnpm dev` | backend + worker + frontend with reload |
+| `pnpm build` | Type-check shared and db, bundle the backend (`backend/dist`), build the frontend |
+| `pnpm typecheck` · `pnpm lint` | TypeScript across all packages · ESLint on the frontend |
+| `pnpm db:generate` | Generate a migration in `db/migrations` after editing `db/src/schema.ts` |
 | `pnpm db:migrate` / `pnpm db:seed` | Apply migrations / load demo data |
-| `node apps/api/dist/server.js` · `node apps/api/dist/worker.js` | Production API and worker |
+| `node backend/dist/index.js` · `node backend/dist/worker.js` | Production API and worker |
+| `pnpm build:extension` | Package the extension into `extension/dist/chromium` |
 
-Load the extension: run `pnpm --filter @jobpilot/extension build`, open `chrome://extensions`, enable Developer mode, click **Load unpacked**, and pick `apps/extension/build`.
+Load the extension: open `chrome://extensions`, enable Developer mode, click **Load unpacked**, and pick the `extension/` folder (or `extension/dist/chromium`). Set the app address in the extension's options if it isn't `http://localhost:3000`.

@@ -1,18 +1,74 @@
-# Local infrastructure: PostgreSQL + Redis. Run the apps with `pnpm dev`.
+# Full local stack: Postgres, Redis, the API, the background worker and the web app.
+#   cp backend/.env.example backend/.env   # optional: add ANTHROPIC_API_KEY, OAuth keys…
+#   docker compose up --build
+# Then open http://localhost:3000
+#
+# Only want the databases (and run the apps with `pnpm dev`)? docker compose up -d db redis
 services:
-  postgres:
+  db:
     image: postgres:16-alpine
     environment:
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: jobpilot
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      retries: 10
+      interval: 3s
+      retries: 20
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: backend/.env
+        required: false
+    environment: &backend-env
+      DATABASE_URL: postgres://postgres:postgres@db:5432/jobpilot
+      REDIS_URL: redis://redis:6379
+      APP_URL: http://localhost:3000
+      API_URL: http://localhost:3001
+      NODE_ENV: development
+    volumes:
+      - uploads:/app/backend/uploads
+    ports: ["3001:3001"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["node", "backend/dist/worker.js"]
+    env_file:
+      - path: backend/.env
+        required: false
+    environment: *backend-env
+    volumes:
+      - uploads:/app/backend/uploads
+    depends_on:
+      - backend
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # the web app proxies /backend/* to the API over the compose network
+        BACKEND_URL: http://backend:3001
+    ports: ["3000:3000"]
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
+  uploads:
